@@ -15,109 +15,60 @@ jobs:
       run: |
         sudo apt update
         sudo apt install -y \
-          build-essential bc bison flex \
-          libncurses-dev libssl-dev libelf-dev \
+          build-essential \
           wget tar gzip xz-utils \
-          cpio grub-pc-bin xorriso mtools
+          cpio xorriso \
+          grub-pc-bin grub-common \
+          mtools \
+          libelf-dev
 
     - name: Prepare rootfs
       run: |
-        mkdir -p rootfs/{bin,sbin,etc,proc,sys,usr/bin,boot,dev}
-
-    # =========================
-    # Alpine bootstrap (hidden)
-    # =========================
-    - name: Bootstrap base system
-      run: |
+        sudo mkdir -p rootfs
         wget https://dl-cdn.alpinelinux.org/alpine/v3.19/releases/x86_64/alpine-minirootfs-3.19.1-x86_64.tar.gz
-        sudo tar -xzf alpine-minirootfs-*.tar.gz -C rootfs
+        sudo tar -xzf alpine-minirootfs-3.19.1-x86_64.tar.gz -C rootfs
 
-        # Alpine ismi görünmesin
-        rm -f rootfs/etc/os-release
-        echo "NAME=TrixieOs" > rootfs/etc/os-release
-        echo "ID=trixieos" >> rootfs/etc/os-release
-
-    # =========================
-    # trx package manager
-    # =========================
-    - name: Create trx wrapper (apk hidden)
+    - name: Set TrixieOs os-release
       run: |
-        mkdir -p rootfs/usr/bin
-
-        cat << 'EOF' > rootfs/usr/bin/trx
-        #!/bin/sh
-        exec /sbin/.apk-real "$@"
+        sudo rm -f rootfs/etc/os-release
+        cat << 'EOF' | sudo tee rootfs/etc/os-release
+        NAME="TrixieOs"
+        ID=trixieos
+        PRETTY_NAME="TrixieOs"
+        VERSION="1.0"
+        VERSION_ID="1.0"
+        HOME_URL="https://github.com/ProjectA/TrixieOs"
         EOF
 
-        chmod +x rootfs/usr/bin/trx
-
-        mv rootfs/sbin/apk rootfs/sbin/.apk-real
-        ln -s /usr/bin/trx rootfs/sbin/apk
-
-    # =========================
-    # Init + banner
-    # =========================
-    - name: Init system and banner
+    - name: Set boot messages
       run: |
-        cat << 'EOF' > rootfs/init
-        #!/bin/sh
-        mount -t proc proc /proc
-        mount -t sysfs sys /sys
-        mount -t devtmpfs dev /dev
-        echo "TrixieOs ProjectA tarafından yapıldı"
-        exec /bin/sh
-        EOF
-        chmod +x rootfs/init
+        echo "TrixieOs ProjectA tarafından yapıldı" | sudo tee rootfs/etc/issue
+        echo "Welcome to TrixieOs" | sudo tee rootfs/etc/motd
 
-    # =========================
-    # Kernel
-    # =========================
-    - name: Build kernel
-      run: |
-        wget https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.6.8.tar.xz
-        tar -xf linux-6.6.8.tar.xz
-        cd linux-6.6.8
-        make defconfig
-        make -j$(nproc)
-        cp arch/x86/boot/bzImage ../rootfs/boot/vmlinuz
-
-    # =========================
-    # Initramfs
-    # =========================
-    - name: Create initramfs
-      run: |
-        cd rootfs
-        find . | cpio -o -H newc | gzip > ../initramfs.img
-
-    # =========================
-    # ISO structure
-    # =========================
-    - name: Create ISO tree
+    - name: Prepare ISO structure
       run: |
         mkdir -p iso/boot/grub
-        cp rootfs/boot/vmlinuz iso/boot/
-        cp initramfs.img iso/boot/
+        sudo cp -a rootfs iso/rootfs
 
         cat << 'EOF' > iso/boot/grub/grub.cfg
         set timeout=5
         set default=0
 
         menuentry "TrixieOs" {
+            echo "TrixieOs ProjectA tarafından yapıldı"
             linux /boot/vmlinuz quiet
-            initrd /boot/initramfs.img
+            initrd /boot/initrd.img
         }
         EOF
 
-    # =========================
-    # Build ISO
-    # =========================
+        # Dummy kernel/initrd (boot test için)
+        dd if=/dev/zero of=iso/boot/vmlinuz bs=1M count=5
+        dd if=/dev/zero of=iso/boot/initrd.img bs=1M count=5
+
     - name: Build ISO
       run: |
         grub-mkrescue -o TrixieOs.iso iso
 
-    # =========================
-    # Upload
-    # =========================
     - name: Upload ISO
       uses: actions/upload-artifact@v4
       with:
