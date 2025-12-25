@@ -1,0 +1,142 @@
+name: Build TrixieOs (trx hidden core)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y \
+          build-essential bc bison flex \
+          libncurses-dev libssl-dev \
+          wget tar gzip xz-utils \
+          cpio grub-pc-bin xorriso
+
+    # =========================
+    # Bootstrap rootfs
+    # =========================
+    - name: Create rootfs
+      run: |
+        mkdir -p rootfs iso/boot/grub
+        wget https://dl-cdn.alpinelinux.org/alpine/v3.19/releases/x86_64/alpine-minirootfs-3.19.1-x86_64.tar.gz
+        tar -xzf alpine-minirootfs-3.19.1-x86_64.tar.gz -C rootfs
+
+        cat << 'EOF' > rootfs/etc/os-release
+        NAME="TrixieOs"
+        ID=trixieos
+        PRETTY_NAME="TrixieOs"
+        EOF
+
+        rm -f rootfs/etc/alpine-release || true
+
+    # =========================
+    # BusyBox (source)
+    # =========================
+    - name: Build BusyBox
+      run: |
+        wget https://busybox.net/downloads/busybox-1.36.1.tar.bz2
+        tar xf busybox-1.36.1.tar.bz2
+        cd busybox-1.36.1
+        make defconfig
+        sed -i 's/# CONFIG_STATIC is not set/CONFIG_STATIC=y/' .config
+        make -j$(nproc)
+        make CONFIG_PREFIX=../rootfs install
+
+    # =========================
+    # trx package manager (apk hidden)
+    # =========================
+    - name: Create trx manager
+      run: |
+        mkdir -p rootfs/usr/bin rootfs/sbin
+
+        # gerçek çekirdek (apk) gizlenir
+        mv rootfs/sbin/apk rootfs/sbin/.trx-core
+
+        # trx komutu
+        cat << 'EOF' > rootfs/usr/bin/trx
+        #!/bin/sh
+        echo "TrixieOs Package Manager (trx)"
+        exec /sbin/.trx-core "$@"
+        EOF
+        chmod +x rootfs/usr/bin/trx
+
+        # apk yazılırsa bile trx çalışsın ama isim görünmesin
+        cat << 'EOF' > rootfs/sbin/apk
+        #!/bin/sh
+        exec /usr/bin/trx "$@"
+        EOF
+        chmod +x rootfs/sbin/apk
+
+    # =========================
+    # Init (terminal only)
+    # =========================
+    - name: Init system
+      run: |
+        cat << 'EOF' > rootfs/init
+        #!/bin/sh
+        mount -t proc none /proc
+        mount -t sysfs none /sys
+        mount -t devtmpfs none /dev
+        clear
+        echo "================================="
+        echo "  TrixieOs ProjectA tarafından yapıldı"
+        echo "================================="
+        echo "Paket yöneticisi: trx"
+        exec /bin/sh
+        EOF
+        chmod +x rootfs/init
+
+    # =========================
+    # Kernel
+    # =========================
+    - name: Build Kernel
+      run: |
+        wget https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.6.8.tar.xz
+        tar xf linux-6.6.8.tar.xz
+        cd linux-6.6.8
+        make defconfig
+        make -j$(nproc)
+        cp arch/x86/boot/bzImage ../iso/vmlinuz
+
+    # =========================
+    # Initramfs
+    # =========================
+    - name: Build initramfs
+      run: |
+        cd rootfs
+        find . | cpio -H newc -ov --owner root:root > ../iso/initrd.img
+
+    # =========================
+    # GRUB
+    # =========================
+    - name: GRUB config
+      run: |
+        cat << 'EOF' > iso/boot/grub/grub.cfg
+        set timeout=0
+        set default=0
+
+        menuentry "TrixieOs" {
+          linux /vmlinuz quiet
+          initrd /initrd.img
+        }
+        EOF
+
+    # =========================
+    # ISO
+    # =========================
+    - name: Build ISO
+      run: |
+        grub-mkrescue -o TrixieOs.iso iso
+
+    - name: Upload ISO
+      uses: actions/upload-artifact@v4
+      with:
+        name: TrixieOs-ISO
+        path: TrixieOs.iso
