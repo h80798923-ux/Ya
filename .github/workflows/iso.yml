@@ -15,7 +15,7 @@ jobs:
         sudo apt update
         sudo apt install -y \
           build-essential bc bison flex \
-          libncurses-dev libssl-dev \
+          libncurses-dev libssl-dev libelf-dev \
           wget tar gzip xz-utils \
           cpio grub-pc-bin xorriso
 
@@ -56,10 +56,8 @@ jobs:
       run: |
         mkdir -p rootfs/usr/bin rootfs/sbin
 
-        # gerçek çekirdek (apk) gizlenir
         mv rootfs/sbin/apk rootfs/sbin/.trx-core
 
-        # trx komutu
         cat << 'EOF' > rootfs/usr/bin/trx
         #!/bin/sh
         echo "TrixieOs Package Manager (trx)"
@@ -67,7 +65,6 @@ jobs:
         EOF
         chmod +x rootfs/usr/bin/trx
 
-        # apk yazılırsa bile trx çalışsın ama isim görünmesin
         cat << 'EOF' > rootfs/sbin/apk
         #!/bin/sh
         exec /usr/bin/trx "$@"
@@ -94,7 +91,7 @@ jobs:
         chmod +x rootfs/init
 
     # =========================
-    # Kernel
+    # Kernel (FIXED)
     # =========================
     - name: Build Kernel
       run: |
